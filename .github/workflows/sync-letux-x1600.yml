@@ -1,0 +1,97 @@
+name: Nightly Letux X1600 U-Boot mirror
+
+# Scheduled workflows only run from the repository default branch.
+# No automatic merge into the hardware-tested branches.
+on:
+  schedule:
+    - cron: '47 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: letux-x1600-v5-upstream-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out only our trusted workflow
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 1
+
+      - name: Mirror only the Letux X1600 source branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_ref=refs/remotes/letux/ingenic-x1600-v5
+          mirror_ref=refs/heads/upstream/letux-x1600-v5
+          upstream=https://github.com/goldelico/letux-uboot.git
+
+          # Fetch objects only. Do NOT execute any upstream scripts or code.
+          git fetch --no-tags --filter=blob:none --depth=256 "$upstream" \
+            "+refs/heads/ingenic-x1600-v5:$source_ref"
+          now=$(git rev-parse "$source_ref")
+          previous=
+          if git ls-remote --exit-code --heads origin "$mirror_ref" >/dev/null 2>&1; then
+            git fetch --no-tags --filter=blob:none --depth=256 origin \
+              "+$mirror_ref:refs/remotes/mirror/letux-x1600-v5"
+            previous=$(git rev-parse refs/remotes/mirror/letux-x1600-v5)
+          fi
+
+          if [ "$previous" = "$now" ]; then
+            echo "Letux X1600 v5 unchanged: $now" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ -n "$previous" ]; then
+            report="$RUNNER_TEMP/retrode3-uboot-upstream-review.md"
+            {
+              echo '# Letux X1600 U-Boot: upstream update'
+              echo
+              echo 'Source: goldelico/letux-uboot, ingenic-x1600-v5'
+              printf 'Previous mirror: %s\nCurrent upstream: %s\n' "$previous" "$now"
+              echo
+              echo "Diff: https://github.com/$GITHUB_REPOSITORY/compare/$previous...$now"
+              echo
+              echo '## Changed files (first 120)'
+              echo '~~~text'
+              git diff --name-status "$previous" "$now" | head -n 120 || true
+              echo '~~~'
+              echo
+              if git merge-base --is-ancestor "$previous" "$now"; then
+                echo 'History: fast-forward. Changes need review before integration.'
+              else
+                echo '**WARNING:** Upstream branch history was rewritten or has a shallow boundary.'
+                echo 'Review the complete diff and verify the correct U-Boot board configuration.'
+              fi
+              echo
+              echo 'The mirror is a reference only. Never auto-merge into develop or master.'
+              echo 'Check letux-x16 SPL, boot environment, MMC offsets and SD partition handling.'
+            } > "$report"
+            cat "$report" >> "$GITHUB_STEP_SUMMARY"
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "Review Letux X1600 U-Boot: ${previous:0:12} -> ${now:0:12}" \
+              --body-file "$report"
+          else
+            echo "Initial Letux X1600 mirror: $now (no retroactive issue)" \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # The lease prevents a stale or concurrent job from silently
+          # overwriting a newer mirror. No other branch is ever pushed.
+          if [ -n "$previous" ]; then
+            git push --force-with-lease="$mirror_ref:$previous" origin \
+              "+$source_ref:$mirror_ref"
+          else
+            git push --force-with-lease="$mirror_ref:" origin \
+              "+$source_ref:$mirror_ref"
+          fi
+          echo "Mirror updated: $mirror_ref -> $now" >> "$GITHUB_STEP_SUMMARY"
