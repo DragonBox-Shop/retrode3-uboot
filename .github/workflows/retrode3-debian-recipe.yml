@@ -1,0 +1,26 @@
+name: Retrode3 X1600 U-Boot Debian packaging syntax
+
+on:
+  pull_request:
+    paths:
+      - 'packaging/retrode3/**'
+      - '.github/workflows/retrode3-debian-recipe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  packaging-preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check X1600 SPL/U-Boot package recipe (no flashing)
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n packaging/retrode3/build-debs.sh
+          grep -Fq 'lx16_uImage_msc0' packaging/retrode3/build-debs.sh
+          grep -Fq 'retrode3-uboot-x1600' packaging/retrode3/build-debs.sh
+          grep -Fq 'u-boot-with-spl-mbr-gpt.bin' packaging/retrode3/build-debs.sh
+          ! grep -Eq 'dd if=.*of=/dev/|flash_erase|nandwrite' packaging/retrode3/build-debs.sh
