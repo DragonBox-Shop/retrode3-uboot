@@ -1,7 +1,14 @@
 name: Retrode3 X1600 U-Boot Debian packaging syntax
 
 on:
+  push:
+    branches: [master]
+    tags: ['apt-*']
+    paths:
+      - 'packaging/retrode3/**'
+      - '.github/workflows/retrode3-debian-recipe.yml'
   pull_request:
+    branches: [master]
     paths:
       - 'packaging/retrode3/**'
       - '.github/workflows/retrode3-debian-recipe.yml'
